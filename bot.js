@@ -1,10 +1,11 @@
+require('dotenv').config()
 const TelegramBot = require('node-telegram-bot-api')
 const {calculateImportPrice} = require("./functions/calculateImport");
 const {askCreditDetails}=require('./functions/calculateCredit');
 const {saveCalculation, deleteCalculation, getCalculationById, getCalculations} = require('./functions/db');
 
 
-const token = '7650778342:AAEc_uUh-AVYt7iO0IhGUT3p7zmkNI3IGEk';
+const token = process.env.TELEGRAM_BOT_TOKEN;
 const bot = new TelegramBot(token, {polling: true});
 
 let userImportData = {}
@@ -257,5 +258,9 @@ function collectCarData(chatId) {
 }
 
 bot.on('polling_error', (error) => {
-    console.error(`Polling error: ${error.code} - ${error.response.body}`);
+    if (error.response) {
+        console.error(`Polling error: ${error.code} - ${error.response.body}`);
+    } else {
+        console.error(`Polling error: ${error.code} - ${error.message}`);
+    }
 });
