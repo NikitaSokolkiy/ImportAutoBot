@@ -1,12 +1,13 @@
-const TelegramBot = require('node-telegram-bot-api');
+const TelegramBot = require('node-telegram-bot-api')
 const {calculateImportPrice} = require("./functions/calculateImport");
-const {askCreditDetails}=require('./functions/calculateCredit')
+const {askCreditDetails}=require('./functions/calculateCredit');
+const {saveCalculation, deleteCalculation, getCalculationById, getCalculations} = require('./functions/db');
+
 
 const token = '7650778342:AAEc_uUh-AVYt7iO0IhGUT3p7zmkNI3IGEk';
 const bot = new TelegramBot(token, {polling: true});
 
 let userImportData = {}
-
 
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
@@ -21,7 +22,7 @@ bot.onText(/\/start/, (msg) => {
         }
     });
 });
-
+//  Слушатель для основнеого меню и расчета растоможки
 bot.on('callback_query', async (callbackQuery) => {
     const chatId = callbackQuery.message.chat.id;
     const action = callbackQuery.data;
@@ -49,22 +50,128 @@ bot.on('callback_query', async (callbackQuery) => {
         case 'help':
             bot.sendMessage(chatId, 'Это бот для расчета растаможки автомобилей. Используй кнопки для взаимодействия.');
             break;
-        case 'showHistory':
-            bot.sendMessage(chatId, 'Пока функция не доступна');
-            break;
         case 'calculateCredit':
             askCreditDetails(bot, chatId)
             break;
-        case 'convertCurrency':
-            bot.sendMessage(chatId, 'Введите сумму и валюту для конвертации.\n(Функция находится в разработке)');
-            break;
-        case 'compareCars':
-            bot.sendMessage(chatId, 'Введите параметры для сравнения автомобилей.\n(Функция находится в разработке)');
-            break;
         default:
-            bot.sendMessage(chatId, 'Неизвестное действие.');
+            break;
     }
 });
+
+bot.on('callback_query', async (callbackQuery)=>{
+    const chatId = callbackQuery.message.chat.id;
+    const action = callbackQuery.data;
+
+    if (action === 'yesSave') {
+        try {
+            await saveCalculation(chatId, userImportData);
+            bot.sendMessage(chatId, 'Ваш расчет сохранен! =)');
+            userImportData = {}; // Сброс данных только после успешного сохранения
+
+            // Возвращаем в главное меню
+            setTimeout(()=>showMainMenu(chatId), 1500);
+        } catch (error) {
+            bot.sendMessage(chatId, 'Ошибка при сохранении расчета: ' + error.message);
+        }
+    }
+
+    if (action === 'noSave') {
+        bot.sendMessage(chatId, 'Расчет не был сохранен.');
+        // Возвращаем в главное меню
+        setTimeout(()=>showMainMenu(chatId), 1500);
+    }
+    try {
+
+        if (action === 'showHistory') {
+            const calculations = await getCalculations(chatId);
+            if (calculations.length === 0) {
+                bot.sendMessage(chatId, 'У вас нет сохраненных расчетов! =( ')
+            } else {
+                const buttons = calculations.map(item => ({
+                    text: `${item.brand} ${item.model} (${item.year})`, callback_data: `calc_${item.id}`
+                }));
+
+                bot.sendMessage(chatId, 'Выберите сохраненный автомобиль ', {
+                    reply_markup: {
+                        inline_keyboard: buttons.map(button => [button])
+                    }
+                });
+            }
+        }
+
+        if (action.startsWith('calc_')) {
+            const calcId = action.split('_')[1];
+            const calculation = await getCalculationById(calcId);
+
+            if (calculation) {
+                // Пересчитываем данные через calculateImportPrice
+                const recalculatedData = await calculateImportPrice({
+                    brand: calculation.brand,
+                    model: calculation.model,
+                    price: calculation.price,
+                    year: calculation.year,
+                    power: calculation.power,
+                    engineVolume: calculation.engine_volume,
+                    type: calculation.type,
+                    typeUtilisation: calculation.type_utilisation
+                });
+
+                // Отправляем полный расчет
+                bot.sendMessage(chatId,
+                    `Детали расчета для ${recalculatedData.nameBrand} ${recalculatedData.nameModel}:\n` +
+                    `- Год: ${calculation.year}\n` +
+                    `- Цена: ${calculation.price} евро\n` +
+                    `- Мощность: ${calculation.power} л.с.\n` +
+                    `- Объем двигателя: ${calculation.engine_volume} куб. см.\n` +
+                    `- Стоимость автомобиля: ${recalculatedData.priceRub.toFixed(2)} рублей\n` +
+                    `- Таможенный сбор: ${recalculatedData.customsDuty} рублей\n` +
+                    `- Акциз: ${recalculatedData.exciseTax} рублей\n` +
+                    `- Утилизационный сбор: ${recalculatedData.recyclingTax} рублей\n` +
+                    `- Таможенная пошлина: ${recalculatedData.customsTax.toFixed(2)} рублей\n` +
+                    `- НДС: ${recalculatedData.VAT} рублей\n` +
+                    `- Общая стоимость таможенных оформлений: ${recalculatedData.totalCost.toFixed(2)} рублей\n` +
+                    `- Общая стоимость автомобиля: ${(recalculatedData.priceRub + recalculatedData.totalCost).toFixed(2)} рублей`,{
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: 'Удалить расчет', callback_data: `delete_${calcId}` }],
+                                [{text: 'Вернуться к списку', callback_data: 'showHistory'}]// Кнопка для удаления
+                            ]
+                        }
+                    }
+                );
+            }
+        }
+        if (action.startsWith('delete_')) {
+            const calcId = action.split('_')[1];
+            try {
+                await deleteCalculation(calcId);
+                bot.sendMessage(chatId, 'Расчет успешно удален.');
+                setTimeout(()=>showMainMenu(chatId), 1500);
+            } catch (error) {
+                console.error('Ошибка при удалении расчета:', error);
+                bot.sendMessage(chatId, 'Произошла ошибка. Попробуйте позже.');
+            }
+        }
+    } catch (error) {
+        bot.sendMessage(chatId, 'Ошибка при получении истории: ' + error.message);
+    }
+});
+
+
+function showMainMenu(chatId) {
+    bot.sendMessage(chatId, "       Выберите функцию:       ", {
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: 'Расчет растаможки', callback_data: 'calculateImport' }],
+                [{ text: 'Помощь', callback_data: 'help' }],
+                [{ text: 'История расчета', callback_data: 'showHistory' }],
+                [{ text: 'Расчитать кредит', callback_data: 'calculateCredit' }]
+            ]
+        }
+    });
+}
+
+
 function personType (chatId){
     bot.sendMessage(chatId, 'Выберите кто вы: ', {
         reply_markup: {
@@ -129,10 +236,15 @@ function collectCarData(chatId) {
                                     `- Утилизационный сбор: ${result.recyclingTax} рублей\n` +
                                     `- Таможенная пошлина: ${result.customsTax.toFixed(2)} рублей\n` +
                                     `- НДС: ${result.VAT} рублей\n` +
-                                    `- Общая стоимость таможенных оформлений: ${result.totalCost} рублей\n` +
+                                    `- Общая стоимость таможенных оформлений: ${result.totalCost.toFixed(2)} рублей\n` +
                                     `- Общая стоимость автомобиля: ${(result.priceRub + result.totalCost).toFixed(2)} рублей`
                                 );
-                                userImportData = {}
+                                bot.sendMessage(chatId,'Сохранить данный расчет ?', {reply_markup: {
+                                        inline_keyboard: [
+                                            [{text: 'Да', callback_data: 'yesSave'}],
+                                            [{text: 'Нет', callback_data: 'noSave'}],
+                                        ]
+                                    }})
                             } catch (error) {
                                 bot.sendMessage(chatId, "Произошла ошибка при расчете: " + error.message)
                             }
