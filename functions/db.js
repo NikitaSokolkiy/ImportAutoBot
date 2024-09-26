@@ -7,6 +7,14 @@ const pool = new Pool({
     password: process.env.DB_PASSWORD,
     port: process.env.DB_PORT,
 });
+pool.connect((err) => {
+    if (err) {
+        console.error('Connection error', err.stack);
+    } else {
+        console.log('Connected to PostgreSQL');
+    }
+});
+
 
 async function saveCalculation(userId, carData){
     const query = `

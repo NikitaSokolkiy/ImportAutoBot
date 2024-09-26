@@ -67,7 +67,7 @@ bot.on('callback_query', async (callbackQuery)=>{
         try {
             await saveCalculation(chatId, userImportData);
             bot.sendMessage(chatId, 'Ваш расчет сохранен! =)');
-            userImportData = {}; // Сброс данных только после успешного сохранения
+            userImportData = {};
 
             // Возвращаем в главное меню
             setTimeout(()=>showMainMenu(chatId), 1500);
@@ -240,12 +240,12 @@ function collectCarData(chatId) {
                                     `- Общая стоимость таможенных оформлений: ${result.totalCost.toFixed(2)} рублей\n` +
                                     `- Общая стоимость автомобиля: ${(result.priceRub + result.totalCost).toFixed(2)} рублей`
                                 );
-                                bot.sendMessage(chatId,'Сохранить данный расчет ?', {reply_markup: {
+                                setTimeout( ()=>bot.sendMessage(chatId,'Сохранить данный расчет ?', {reply_markup: {
                                         inline_keyboard: [
                                             [{text: 'Да', callback_data: 'yesSave'}],
                                             [{text: 'Нет', callback_data: 'noSave'}],
                                         ]
-                                    }})
+                                    }}), 2000)
                             } catch (error) {
                                 bot.sendMessage(chatId, "Произошла ошибка при расчете: " + error.message)
                             }
